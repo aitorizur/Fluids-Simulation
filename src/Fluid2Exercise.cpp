@@ -1,120 +1,147 @@
 #include "Scene.h"
-
 #include "Numeric/PCGSolver.h"
 
 namespace asa
 {
+
 namespace
 {
 ////////////////////////////////////////////////
 // Add any reusable classes or functions HERE //
 ////////////////////////////////////////////////
+
+
 }  // namespace
 
-// advection
 void Fluid2::fluidAdvection(const float dt)
 {
+    // Ink Advection
+    Array2<Vector3> inkRGBCopy(inkRGB);
+    Index2 inkRGBSize = inkRGB.getSize();
+
+    for (int i = 0; i < inkRGBSize.x; i++) 
     {
-        // Ink advection HERE
-
-        auto inkRGB_ = this->inkRGB;
-
-        for (size_t i = 0; i < this->grid.getSize().x; i++) 
+        for (int j = 0; j < inkRGBSize.y; j++) 
         {
-            for (size_t j = 0; j < this->grid.getSize().y; j++) 
-            {
-                Vector2 x = grid.getCellPos(Index2(i, j));
-        
-                auto vx = (velocityX.getValue(i + 1, j) + velocityX.getValue(i, j)) * 0.5f;
-                auto vy = (velocityY.getValue(i, j + 1) + velocityY.getValue(i, j)) * 0.5f;
-                Vector2 v(vx, vy);
-        
-                Vector2 x_1 = x - (dt * v);
-                Vector2 indices = grid.getCellIndex(x_1);
+            Index2 id = Index2(i, j);
+            Vector2 cellPosition = grid.getCellPos(id);
 
-                indices.x = clamp(indices.x, 0, grid.getSize().x - 1);
-                indices.y = clamp(indices.y, 0, grid.getSize().y - 1);
-        
-                auto aa = inkRGB_.getValue(floor(indices.x), floor(indices.y));
-                auto ab = inkRGB_.getValue(floor(indices.x), floor(indices.y) + 1);
-                auto ba = inkRGB_.getValue(floor(indices.x) + 1, floor(indices.y));
-                auto bb = inkRGB_.getValue(floor(indices.x) + 1, floor(indices.y) + 1);
+            float iNext = floor(clamp(i + 1, 0, inkRGBSize.x - 1));
+            float jNext = floor(clamp(j + 1, 0, inkRGBSize.y - 1));
+            float vx = velocityX[id] + velocityX[Index2(iNext, j)] * 0.5f;
+            float vy = velocityY[id] + velocityY[Index2(i, jNext)] * 0.5f;
 
-                auto s = indices.x - floor(indices.x);
-                auto t = indices.y - floor(indices.y);
-        
-                auto newInk = bilerp(aa, ab, ba, bb, s, t);
-        
-                inkRGB.setValue(i, j, newInk);
-            }
+            Vector2 prevPosition = cellPosition - dt * Vector2(vx, vy);
+            Vector2 prevId = grid.getCellIndex(prevPosition);
+
+            float clampPrevX = floor(clamp(prevId.x, 0, inkRGBSize.x - 1));
+            float clampX = floor(clamp(prevId.x + 1, 0, inkRGBSize.x - 1));
+            float clampPrevY = floor(clamp(prevId.y, 0, inkRGBSize.y - 1));
+            float clampY = floor(clamp(prevId.y + 1, 0, inkRGBSize.y - 1));
+
+            Vector3 aa = inkRGBCopy[Index2(clampPrevX, clampPrevY)];
+            Vector3 ba = inkRGBCopy[Index2(clampX, clampPrevY)];
+            Vector3 ab = inkRGBCopy[Index2(clampPrevX, clampY)];
+            Vector3 bb = inkRGBCopy[Index2(clampX, clampY)];
+
+            float t = prevId.x - floor(prevId.x);
+            float s = prevId.y - floor(prevId.y);
+            Vector3 bilerpInk = bilerp(aa, ba, ab, bb, t, s);
+            inkRGB[id] = bilerpInk;
         }
     }
 
+    // Velocity advection
+    Array2<float> velocityXCopy(velocityX);
+    Array2<float> velocityYCopy(velocityY);
+    Index2 sizeVelocityX = velocityX.getSize();
+    Index2 sizeVelocityY = velocityY.getSize();
+
+    // Velocity X
+    for (int i = 0; i < sizeVelocityX.x; i++) 
     {
-        auto velocityX_ = velocityX;
-        
-        // Velocity X
-        for (size_t i = 0; i < velocityX.getSize().x; i++) 
+        for (int j = 0; j < sizeVelocityX.y; j++) 
         {
-            for (size_t j = 0; j < velocityX.getSize().y; j++) 
-            {
-                Vector2 x = grid.getFacePosX(Index2(i, j));
+            Index2 id = Index2(i, j);
 
-                auto vx = velocityX.getValue(i, j);
-                auto vy = velocityY.getValue(grid.getFaceIndexY(x).x, grid.getFaceIndexY(x).y);
-                Vector2 v(vx, vy);
+            Vector2 facePosition = grid.getFacePosX(id);
 
-                Vector2 x_1 = x - (dt * v);
-                Vector2 indices = grid.getFaceIndexX(x_1);
+            int clampI = clamp(i, 0, sizeVelocityY.x - 1);
+            int clampIPrev = clamp(i - 1, 0, sizeVelocityY.x - 1);
+            int clampJ = clamp(j, 0, sizeVelocityY.y - 1);
+            int clampJPrev = clamp(j - 1, 0, sizeVelocityY.y - 1);
 
-                indices.x = clamp(indices.x, 0, velocityX.getSize().x - 1);
-                indices.y = clamp(indices.y, 0, velocityX.getSize().y - 1);
+            float u = velocityXCopy[id];
 
-                auto aa = velocityX_.getValue(floor(indices.x), floor(indices.y));
-                auto ab = velocityX_.getValue(floor(indices.x), floor(indices.y) + 1);
-                auto ba = velocityX_.getValue(floor(indices.x) + 1, floor(indices.y));
-                auto bb = velocityX_.getValue(floor(indices.x) + 1, floor(indices.y) + 1);
+            float v0 = velocityYCopy[Index2(clampIPrev, clampJ)];
+            float v1 = velocityYCopy[Index2(clampI, clampJ)];
+            float v2 = velocityYCopy[Index2(clampIPrev, clampJPrev)];
+            float v3 = velocityYCopy[Index2(clampI, clampJPrev)];
 
-                auto s = indices.x - floor(indices.x);
-                auto t = indices.y - floor(indices.y);
+            float v = (v0 + v1 + v2 + v3) * 0.25f;
 
-                auto newVelocityX = bilerp(aa, ab, ba, bb, s, t);
+            Vector2 prevPosition = facePosition - dt * Vector2(u, v);
+            Vector2 prevId = grid.getCellIndex(prevPosition);
 
-                velocityX.setValue(i, j, newVelocityX);
-            }
+            float clampVIX = floor(clamp(prevId.x, 0, sizeVelocityX.x - 1));
+            float clampVIX1 = floor(clamp(prevId.x + 1, 0, sizeVelocityX.x - 1));
+            float clampVIY = floor(clamp(prevId.y, 0, sizeVelocityX.y - 1));
+            float clampVIY1 = floor(clamp(prevId.y + 1, 0, sizeVelocityX.y - 1));
+
+            float aa = velocityXCopy[Index2(clampVIX, clampVIY)];
+            float ba = velocityXCopy[Index2(clampVIX1, clampVIY)];
+            float ab = velocityXCopy[Index2(clampVIX, clampVIY1)];
+            float bb = velocityXCopy[Index2(clampVIX1, clampVIY1)];
+
+            float t = prevId.x - floor(prevId.x);
+            float s = prevId.y - floor(prevId.y);
+
+            velocityX[id] = bilerp(aa, ba, ab, bb, t, s);
         }
+    }
 
-        auto velocityY_ = velocityY;
-
-        // Velocity Y
-        for (size_t i = 0; i < velocityY.getSize().x; i++) 
+    // Velocity Y
+    for (int i = 0; i < sizeVelocityY.x; i++) 
+    {
+        for (int j = 0; j < sizeVelocityY.x; j++) 
         {
-            for (size_t j = 0; j < velocityY.getSize().y; j++) 
-            {
-                Vector2 x = grid.getFacePosX(Index2(i, j));
+            Index2 id = Index2(i, j);
 
-                auto vx = velocityX.getValue(grid.getFaceIndexX(x).x, grid.getFaceIndexX(x).y);
-                auto vy = velocityY.getValue(i, j);
-                Vector2 v(vx, vy);
+            Vector2 facePosition = grid.getFacePosY(id);
 
-                Vector2 x_1 = x - (dt * v);
-                Vector2 indices = grid.getFaceIndexY(x_1);
+            int clampI = clamp(i, 0, sizeVelocityX.x - 1);
+            int clampINext = clamp(i + 1, 0, sizeVelocityX.x - 1);
+            int clampIPrev = clamp(i - 1, 0, sizeVelocityX.x - 1);
+            int clampJ = clamp(j, 0, sizeVelocityX.y - 1);
+            int clampJNext = clamp(j + 1, 0, sizeVelocityX.y - 1);
+            int clampJPrev = clamp(j - 1, 0, sizeVelocityX.y - 1);
 
-                indices.x = clamp(indices.x, 0, velocityY.getSize().x - 1);
-                indices.y = clamp(indices.y, 0, velocityY.getSize().y - 1);
+            float v = velocityYCopy[id];
 
-                auto aa = velocityY_.getValue(floor(indices.x), floor(indices.y));
-                auto ab = velocityY_.getValue(floor(indices.x), floor(indices.y) + 1);
-                auto ba = velocityY_.getValue(floor(indices.x) + 1, floor(indices.y));
-                auto bb = velocityY_.getValue(floor(indices.x) + 1, floor(indices.y) + 1);
+            float u0 = velocityXCopy[Index2(clampI, clampJPrev)];
+            float u1 = velocityXCopy[Index2(clampI, clampJ)];
+            float u2 = velocityXCopy[Index2(clampINext, clampJPrev)];
+            float u3 = velocityXCopy[Index2(clampINext, clampJ)];
 
-                auto s = indices.x - floor(indices.x);
-                auto t = indices.y - floor(indices.y);
+            float u = (u0 + u1 + u2 + u3) * 0.25f;
 
-                auto newVelocityY = bilerp(aa, ab, ba, bb, s, t);
+            Vector2 prevPosition = facePosition - dt * Vector2(u, v);
+            Vector2 prevId = grid.getCellIndex(prevPosition);
 
-                velocityY.setValue(i, j, newVelocityY);
-            }
+            float clampVIX = floor(clamp(prevId.x, 0, sizeVelocityY.x - 1));
+            float clampVIX1 = floor(clamp(prevId.x + 1, 0, sizeVelocityY.x - 1));
+            float clampVIY = floor(clamp(prevId.y, 0, sizeVelocityY.y - 1));
+            float clampVIY1 = floor(clamp(prevId.y + 1, 0, sizeVelocityY.y - 1));
+
+            float aa = velocityYCopy[Index2(clampVIX, clampVIY)];
+            float ba = velocityYCopy[Index2(clampVIX1, clampVIY)];
+            float ab = velocityYCopy[Index2(clampVIX, clampVIY1)];
+            float bb = velocityYCopy[Index2(clampVIX1, clampVIY1)];
+
+            float t = prevId.x - floor(prevId.x);
+            float s = prevId.y - floor(prevId.y);
+
+            velocityY[id] = bilerp(aa, ba, ab, bb, t, s);
         }
     }
 }
@@ -123,23 +150,32 @@ void Fluid2::fluidEmission()
 {
     if (Scene::testcase >= Scene::SMOKE) 
     {
-        uint lowYIndex = 0.2f * inkRGB.getSize().y;
+        int startRedX = 39;
+        int startGreenX = 44;
+        int startBlueX = 54;
+        int startY = 0;
+        int endY = 15;
+        int endX = 59;
 
-        for (size_t i = 0; i < inkRGB.getSize().x; i++) 
+        Vector3 color = Vector3(1.0f, 0.0f, 0.0f);
+
+        for (int i = startRedX; i < endX; i++) 
         {
-            Vector3 newColor = i < inkRGB.getSize().x * 0.5f ? Vector3(1, 0, 0) : Vector3(0, 1, 0);
-
-            for (size_t j = 0; j < lowYIndex; j++) 
+            if (i >= startGreenX) 
             {
-                inkRGB.setValue(Index2(i, j), newColor);
+                color = Vector3(0.0f, 1.0f, 0.0f);
             }
-        }
-
-        for (size_t i = 0; i < velocityY.getSize().x; i++) 
-        {
-            for (size_t j = 0; j < lowYIndex + 1; j++) 
+            if (i >= startBlueX) 
             {
-                velocityY.setValue(i, j, 1);
+                color = Vector3(0.0f, 0.0f, 1.0f);
+            }
+
+            for (int j = startY; j < endY; j++) 
+            {
+                // Give starting color and velocity
+                Index2 ind(i, j);
+                inkRGB[ind] = color;
+                velocityY[ind] = 10.0f;
             }
         }
     }
@@ -149,12 +185,14 @@ void Fluid2::fluidVolumeForces(const float dt)
 {
     if (Scene::testcase >= Scene::SMOKE) 
     {
-        // Aplicar la gravedad
-        for (size_t i = 0; i < this->velocityY.getSize().x; i++) 
+        Index2 sizeY = velocityY.getSize();
+
+        for (int i = 0; i < sizeY.x; ++i) 
         {
-            for (size_t j = 0; j < this->velocityY.getSize().y; j++) 
-            {                
-                velocityY.setValue(i, j, velocityY.getValue(i, j) + dt / Scene::kDensity * Scene::kGravity);
+            for (int j = 0; j < sizeY.y; ++j) 
+            {
+                Index2 id(i, j);
+                velocityY[id] += dt * Scene::kGravity;  // Add gravity
             }
         }
     }
@@ -164,21 +202,46 @@ void Fluid2::fluidViscosity(const float dt)
 {
     if (Scene::testcase >= Scene::SMOKE) 
     {
-        for (size_t i = 1; i < this->grid.getSize().x; i++) 
+        Array2<float> copyVelocityX(velocityX);
+        Array2<float> copyVelocityY(velocityY);
+
+        Index2 sizeX = velocityX.getSize();
+        Index2 sizeY = velocityY.getSize();
+
+        float squareDx = pow(grid.getDx().x, 2);
+        float squareDy = pow(grid.getDx().y, 2);
+
+        // viscosity X
+        for (int i = 0; i < sizeX.x; ++i) 
         {
-            for (size_t j = 1; j < this->grid.getSize().y; j++) 
+            for (int j = 0; j < sizeX.y; ++j) 
             {
-                float stepVelocityX = dt / Scene::kDensity *
-                    ((velocityX.getValue(i + 1, j) - 2 * velocityX.getValue(i, j) + velocityX.getValue(i - 1, j) / pow(grid.getDx().x, 2)) +
-                     (velocityX.getValue(i, j + 1) - 2 * velocityX.getValue(i, j) + velocityX.getValue(i, j - 1) / pow(grid.getDx().y, 2)));
+                Index2 id(i, j);
 
-                velocityX.setValue(i, j, velocityX[i, j] + stepVelocityX);
-                
-                float stepVelocityY = dt / Scene::kDensity *
-                    ((velocityY.getValue(i + 1, j) - 2 * velocityY.getValue(i, j) + velocityY.getValue(i - 1, j) / pow(grid.getDx().x, 2)) +
-                     (velocityY.getValue(i, j + 1) - 2 * velocityY.getValue(i, j) + velocityY.getValue(i, j - 1) / pow(grid.getDx().y, 2)));
+                Index2 idINext(clamp(i + 1, 0, sizeX.x - 1), j);
+                Index2 idIPrev(clamp(i - 1, 0, sizeX.x - 1), j);
+                Index2 idJNext(i, clamp(j + 1, 0, sizeX.y - 1));
+                Index2 idjPrev(i, clamp(j - 1, 0, sizeX.y - 1));
 
-                velocityY.setValue(i, j, velocityY[i, j] + stepVelocityY);
+                velocityX[id] += dt * Scene::kViscosity / Scene::kDensity * ((copyVelocityX[idINext] - 2.0f * copyVelocityX[id] + copyVelocityX[idIPrev]) / squareDx +
+                                        (copyVelocityX[idJNext] - 2.0f * copyVelocityX[id] + copyVelocityX[idjPrev]) / squareDy);
+            }
+        }
+
+        // viscosity Y
+        for (int i = 0; i < sizeY.x; ++i) 
+        {
+            for (int j = 0; j < sizeY.y; ++j) 
+            {
+                Index2 id(i, j);
+
+                Index2 idINext(clamp(i - 1, 0, sizeY.x - 1), j);
+                Index2 idIPrev(clamp(i + 1, 0, sizeY.x - 1), j);
+                Index2 idJNext(i, clamp(j - 1, 0, sizeY.y - 1));
+                Index2 idJPrev(i, clamp(j + 1, 0, sizeY.y - 1));
+
+                velocityY[id] += dt * Scene::kViscosity / Scene::kDensity * ((copyVelocityY[idINext] - 2.0f * copyVelocityY[id] + copyVelocityY[idIPrev]) * squareDx +
+                                        (copyVelocityY[idJNext] - 2.0f * copyVelocityY[id] + copyVelocityY[idJPrev]) * squareDy);
             }
         }
     }
@@ -188,104 +251,111 @@ void Fluid2::fluidPressureProjection(const float dt)
 {
     if (Scene::testcase >= Scene::SMOKE) 
     {
-        // Incompressibility / Pressure term HERE
-        // 
-        // Las presiones y tinta se quedán en el centro de celda, lo que se desplazan son las velocidades en x e y
-        // 
-        // Para las variables de contorno usar solidas, restando -1 a cada elemento que esté pegado a la pared de la matriz, -2 en el caso de las esquinas
+        float dx = grid.getDx().x;
+        float dy = grid.getDx().y;
+        float inverseSquareDx = 1.0f / pow(grid.getDx().x, 2);
+        float inverseSquareDy = 1.0f / pow(grid.getDx().y, 2);
 
-        // Make walls normal velocities = 0, todas las las velocidades paredes en las matrices seteadas a 0
+        Index2 pressureSize = pressure.getSize();
+        Index2 velocityXSize = velocityX.getSize();
+        Index2 velocityYSize = velocityY.getSize();
 
-        for (size_t i = 0; i < this->grid.getSizeFacesX().x; i++) 
+        // Boundaries
+        for (int j = 0; j < velocityXSize.y; ++j) 
         {
-            velocityX[i, 0] = 0;
-            velocityX[i, velocityX.getSize()] = 0;
-        
-            velocityX[0, i] = 0;
-            velocityX[velocityX.getSize(), i] = 0;
-        
-            velocityY[i, 0] = 0;
-            velocityY[i, velocityY.getSize()] = 0;
-        
-            velocityY[0, i] = 0;
-            velocityY[velocityY.getSize(), i] = 0;
+            velocityX[Index2(0, j)] = 0.0f;
+            velocityX[Index2(velocityXSize.x - 1, j)] = 0.0f;
         }
-        
-        // Compute RHS
-        
-        //std::vector<double> b(0);
-        //b.resize(grid.getSize().x * grid.getSize().y + 1);
-        //
-        //
-        //for (size_t i = 1; i < this->grid.getSize().x + 1; i++) 
-        //{
-        //    for (size_t j = 1; j < this->grid.getSize().y + 1; j++) 
-        //    {
-        //        
-        //
-        //        b[velocityX.getLinearIndex(i, j)] = velocityX[i, j] - velocityX[i - 1, j - 1];
-        //
-        //        // En b falta añadir las velocidades en y pero en que indices?
-        //
-        //        //Usar array2 getlinearindex funcion?
-        //
-        //    }
-        //}
-        //
-        //std::vector<double> result(0);
-        //result.resize(grid.getSize().x * grid.getSize().y);
-        //
-        //SparseMatrix<double> A(grid.getSize().x * grid.getSize().y, 5);
-        //
-        //for (size_t i = 0; i < this->grid.getSize().x * this->grid.getSize().y + 1; i++) 
-        //{
-        //    A.set_element(i, i, 2);
-        //
-        //    if (i + 1 > grid.getSize().x + 1) 
-        //    {
-        //        A.add_to_element(i, i, -1);
-        //    } 
-        //    else 
-        //    {
-        //        A.set_element(i + 1, i, -1);
-        //    }
-        //
-        //    if (i + 1 > grid.getSize().y + 1) 
-        //    {
-        //        A.add_to_element(i, i, -1);
-        //    } 
-        //    else 
-        //    {
-        //        A.set_element(i, i + 1, -1);
-        //    }
-        //}
-        //
-        //PCGSolver<double> solver;
-        //solver.set_solver_parameters(0.000001, 200);
-        //
-        //double residual_out;
-        //int iterations_out;
-        //
-        //// Falta añadir las partes que multiplican a A y b antes de resolver la ecuación
-        //
-        //solver.solve(A, b, result, residual_out, iterations_out);
-        //
-        //
-        //
-        ////Aplicar solucion a cada una de las velocidades
-        //// Aplicar en los dos ejes por separado
-        //// Aplicar los gradientes de presion a los resultados
-        //// No hace falta aplicar velocidades a los bordes?
-        //
-        //for (size_t i = 1; i < this->grid.getSize().x - 1; i++) 
-        //{
-        //    for (size_t j = 1; j < this->grid.getSize().y - 1; j++) 
-        //    {
-        //        // Usar array2 getlinearindex funcion?
-        //
-        //        //b[i + j] = ;
-        //    }
-        //}
+        for (int i = 0; i < velocityYSize.x; ++i) 
+        {
+            velocityY[Index2(i, 0)] = 0.0f;
+        }
+
+        // Matrix b
+        std::vector<double> b(pressureSize.x * pressureSize.y);
+        for (int i = 0; i < pressureSize.x; ++i) 
+        {
+            for (int j = 0; j < pressureSize.y; ++j) 
+            {
+                Index2 id(i, j);
+                b[pressure.getLinearIndex(i, j)] = -Scene::kDensity / dt * ((velocityX[Index2(i + 1, j)] - velocityX[id]) / dx +
+                                                                           (velocityY[Index2(i, j + 1)] - velocityY[id]) / dy);
+            }
+        }
+
+        // Matrix A
+        SparseMatrix<double> A(pressureSize.x * pressureSize.y, 10);
+        for (int i = 0; i < pressureSize.x; ++i) 
+        {
+            for (int j = 0; j < pressureSize.y; ++j) 
+            {
+                int id = pressure.getLinearIndex(i, j);
+                if (i > 0) 
+                {
+                    int idIPrev = pressure.getLinearIndex(i - 1, j);
+                    A.add_to_element(id, id, inverseSquareDx);
+                    A.add_to_element(id, idIPrev, -1.0 * inverseSquareDx);
+                }
+                if (i < pressureSize.x - 1) 
+                {
+                    int idINext = pressure.getLinearIndex(i + 1, j);
+                    A.add_to_element(id, id, inverseSquareDx);
+                    A.add_to_element(id, idINext, -1.0 * inverseSquareDx);
+                }
+                if (j > 0) 
+                {
+                    int idJPrev = pressure.getLinearIndex(i, j - 1);
+                    A.add_to_element(id, id, inverseSquareDy);
+                    A.add_to_element(id, idJPrev, -1.0 * inverseSquareDy);
+                }
+
+                A.add_to_element(id, id, inverseSquareDy);
+                if (j < pressureSize.y - 1) 
+                {
+                    int idJNext = pressure.getLinearIndex(i, j + 1);
+                    A.add_to_element(id, idJNext, -1.0 * inverseSquareDy);
+                }
+            }
+        }
+
+        // Pressure solve
+        PCGSolver<double> solver;
+        solver.set_solver_parameters(0.0001, 100000);
+
+        double residualOut;
+        int iterationsOut;
+        std::vector<double> result(pressureSize.x * pressureSize.y);
+        solver.solve(A, b, result, residualOut, iterationsOut);
+
+        // Pressure
+        int n = pressureSize.x * pressureSize.y;
+        for (int i = 0; i < n; ++i) 
+        {
+            pressure[i] = (float)result[i];
+        }
+
+        // Pressure gradient
+        float constant = -dt / Scene::kDensity;
+
+        for (int i = 1; i < velocityXSize.x - 1; ++i) 
+        {
+            for (int j = 0; j < velocityXSize.y; ++j) 
+            {
+                Index2 id(i, j);
+                float pressureGrad = (pressure[id] - pressure[Index2(i - 1, j)]) / dx;
+                velocityX[id] += constant * pressureGrad;
+            }
+        }
+
+        for (int i = 0; i < velocityYSize.x; ++i) 
+        {
+            for (int j = 1; j < velocityYSize.y - 1; ++j) 
+            {
+                Index2 id(i, j);
+                float pressureGrad = (pressure[id] - pressure[Index2(i, j - 1)]) / dy;
+                velocityY[id] += constant * pressureGrad;
+            }
+        }
     }
 }
 }  // namespace asa
